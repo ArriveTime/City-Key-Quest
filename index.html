@@ -1936,14 +1936,14 @@ select:focus {
 
     <button
         class="action-btn"
-        onclick="openLocationEncounter()">
+        onclick="showHowToPlay()">
 
         <i
-            class="fa-solid fa-location-dot"
+            class="fa-solid fa-circle-question"
             style="color:var(--cyan)">
         </i>
 
-        Enter Business / Location
+        How To Play
 
     </button>
 
@@ -2116,6 +2116,18 @@ let gameTimer =
 
 let jailTimer =
     null;
+
+let poiMarkers =
+    [];
+
+let poiList =
+    [];
+
+let goldenKeyPoiIndex =
+    -1;
+
+let gameWon =
+    false;
 
 
 /* =========================================================
@@ -2582,6 +2594,827 @@ async function getCoordinatesFromZip(zip) {
 
 
 /* =========================================================
+   FREE LOCAL BUSINESS DATA (OpenStreetMap Overpass API)
+   No API key required. Pulls real shops, restaurants,
+   tourist attractions and historic sites near the player.
+========================================================= */
+
+async function fetchNearbyPOIs(lat, lng, radius = 1200) {
+
+
+    const query = `
+        [out:json][timeout:25];
+        (
+          node["shop"](around:${radius},${lat},${lng});
+          node["amenity"~"restaurant|cafe|bar|fast_food|pub|ice_cream|marketplace|cinema|theatre|arts_centre|bakery"](around:${radius},${lat},${lng});
+          node["tourism"](around:${radius},${lat},${lng});
+          node["historic"](around:${radius},${lat},${lng});
+        );
+        out body 60;
+    `;
+
+
+    const response =
+        await fetch(
+
+            'https://overpass-api.de/api/interpreter',
+
+            {
+                method:
+                    'POST',
+
+                body:
+                    'data=' + encodeURIComponent(query)
+            }
+
+        );
+
+
+    if (
+        !response.ok
+    ) {
+
+        throw new Error(
+            'Business directory lookup failed.'
+        );
+
+    }
+
+
+    const data =
+        await response.json();
+
+
+    return (
+        data.elements || []
+    ).filter(
+
+        el =>
+            el.tags &&
+            el.tags.name
+
+    );
+
+}
+
+
+/*
+   Turn raw OpenStreetMap tags into a
+   simple, game-friendly category.
+*/
+
+function classifyPoi(tags) {
+
+
+    if (tags.historic) {
+
+        return {
+            label: tags.historic.replace(/_/g,' '),
+            icon: 'fa-landmark',
+            color: '#ffd400'
+        };
+
+    }
+
+
+    if (tags.tourism) {
+
+        return {
+            label: tags.tourism.replace(/_/g,' '),
+            icon: 'fa-monument',
+            color: '#a855ff'
+        };
+
+    }
+
+
+    if (tags.amenity) {
+
+        return {
+            label: tags.amenity.replace(/_/g,' '),
+            icon: 'fa-utensils',
+            color: '#ff8a00'
+        };
+
+    }
+
+
+    if (tags.shop) {
+
+        return {
+            label: tags.shop.replace(/_/g,' ') + ' shop',
+            icon: 'fa-store',
+            color: '#20ff91'
+        };
+
+    }
+
+
+    return {
+        label: 'local business',
+        icon: 'fa-map-pin',
+        color: '#00f6ff'
+    };
+
+}
+
+
+/*
+   Load real nearby businesses / attractions,
+   hide the Golden Key at one of them, and
+   drop a marker for each on the map.
+*/
+
+async function loadNearbyPOIs() {
+
+
+    poiList = [];
+
+    goldenKeyPoiIndex = -1;
+
+    gameWon = false;
+
+
+    addLog(
+        'SCANNING AREA FOR LOCAL BUSINESSES...'
+    );
+
+
+    try {
+
+        const elements =
+            await fetchNearbyPOIs(
+                gameState.lat,
+                gameState.lng
+            );
+
+
+        if (
+            !elements.length
+        ) {
+
+            addLog(
+                'NO NEARBY BUSINESS DATA FOUND FOR THIS ZIP CODE.'
+            );
+
+            return;
+
+        }
+
+
+        const shuffled =
+
+            elements
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 25);
+
+
+        poiList =
+            shuffled.map(
+
+                (el, i) => {
+
+                    const info =
+                        classifyPoi(
+                            el.tags
+                        );
+
+                    return {
+
+                        id: i,
+
+                        name: el.tags.name,
+
+                        lat: el.lat,
+
+                        lng: el.lon,
+
+                        tags: el.tags,
+
+                        category: info.label,
+
+                        icon: info.icon,
+
+                        color: info.color,
+
+                        website:
+                            el.tags.website
+                            ||
+                            el.tags['contact:website']
+                            ||
+                            null,
+
+                        address:
+                            [
+                                el.tags['addr:housenumber'],
+                                el.tags['addr:street']
+                            ]
+                            .filter(Boolean)
+                            .join(' '),
+
+                        searched: false,
+
+                        isGoldenKey: false
+
+                    };
+
+                }
+
+            );
+
+
+        goldenKeyPoiIndex =
+            Math.floor(
+                Math.random() * poiList.length
+            );
+
+
+        poiList[goldenKeyPoiIndex].isGoldenKey =
+            true;
+
+
+        placePoiMarkers();
+
+
+        addLog(
+
+            `${poiList.length} LOCAL BUSINESSES MAPPED // THE GOLDEN KEY IS HIDDEN AMONG THEM`
+
+        );
+
+
+        addLog(
+
+            'TIP: ROLL THE DIE FOR MOVES, THEN CLICK A MARKER ON THE MAP TO SEARCH IT.'
+
+        );
+
+
+    } catch(error) {
+
+        addLog(
+
+            `BUSINESS SCAN FAILED // ${error.message}`
+
+        );
+
+    }
+
+}
+
+
+/*
+   Draw a clickable marker for every
+   local business / attraction.
+*/
+
+function placePoiMarkers() {
+
+
+    poiMarkers.forEach(
+
+        marker =>
+            map.removeLayer(marker)
+
+    );
+
+
+    poiMarkers = [];
+
+
+    poiList.forEach(
+
+        poi => {
+
+
+            const ringColor =
+                poi.searched
+                    ? '#3a4a5c'
+                    : poi.color;
+
+
+            const icon =
+                L.divIcon({
+
+                    html: `
+
+                        <div style="
+                            width:34px;
+                            height:34px;
+
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+
+                            border-radius:50%;
+
+                            background:rgba(2,8,18,.85);
+
+                            border:2px solid ${ringColor};
+
+                            box-shadow:
+                                ${poi.searched
+                                    ? 'none'
+                                    : `0 0 12px ${ringColor}`};
+                        ">
+
+                            <i
+                                class="fa-solid ${poi.icon}"
+                                style="
+                                    color:${ringColor};
+                                    font-size:14px;
+                                ">
+                            </i>
+
+                        </div>
+
+                    `,
+
+                    className: 'poi-marker',
+
+                    iconSize: [34,34],
+
+                    iconAnchor: [17,17]
+
+                });
+
+
+            const marker =
+
+                L.marker(
+
+                    [poi.lat, poi.lng],
+
+                    { icon }
+
+                )
+                .addTo(map);
+
+
+            marker.on(
+
+                'click',
+
+                () =>
+                    openBusinessEncounter(poi.id)
+
+            );
+
+
+            poiMarkers.push(
+                marker
+            );
+
+        }
+
+    );
+
+}
+
+
+/*
+   Distance (meters) between two
+   map coordinates.
+*/
+
+function haversineDistance(lat1, lon1, lat2, lon2) {
+
+
+    const R = 6371000;
+
+    const toRad =
+        d => d * Math.PI / 180;
+
+    const dLat =
+        toRad(lat2 - lat1);
+
+    const dLon =
+        toRad(lon2 - lon1);
+
+    const a =
+
+        Math.sin(dLat/2) ** 2
+        +
+        Math.cos(toRad(lat1))
+        *
+        Math.cos(toRad(lat2))
+        *
+        Math.sin(dLon/2) ** 2;
+
+
+    return (
+
+        R * 2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        )
+
+    );
+
+}
+
+
+/*
+   Compass direction from one
+   coordinate toward another.
+*/
+
+function bearingToCompass(lat1, lon1, lat2, lon2) {
+
+
+    const toRad =
+        d => d * Math.PI / 180;
+
+    const y =
+        Math.sin(toRad(lon2 - lon1))
+        *
+        Math.cos(toRad(lat2));
+
+    const x =
+
+        Math.cos(toRad(lat1))
+        *
+        Math.sin(toRad(lat2))
+        -
+        Math.sin(toRad(lat1))
+        *
+        Math.cos(toRad(lat2))
+        *
+        Math.cos(toRad(lon2 - lon1));
+
+
+    const brng =
+        (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+
+
+    const dirs = [
+
+        'north', 'northeast', 'east', 'southeast',
+        'south', 'southwest', 'west', 'northwest'
+
+    ];
+
+
+    return dirs[
+        Math.round(brng / 45) % 8
+    ];
+
+}
+
+
+/*
+   Build a spoken/written clue pointing
+   toward the Golden Key location.
+*/
+
+function generateClue(poi) {
+
+
+    const key =
+        poiList[goldenKeyPoiIndex];
+
+
+    const distMeters =
+        haversineDistance(
+
+            poi.lat, poi.lng,
+            key.lat, key.lng
+
+        );
+
+
+    const blocks =
+        Math.max(
+            1,
+            Math.round(distMeters / 80)
+        );
+
+
+    const dir =
+        bearingToCompass(
+
+            poi.lat, poi.lng,
+            key.lat, key.lng
+
+        );
+
+
+    return (
+
+        `The key seems to be about ${blocks} block${blocks === 1 ? '' : 's'} ` +
+        `to the ${dir}, near a ${key.category}.`
+
+    );
+
+}
+
+
+/*
+   Player clicks a real business
+   marker on the map.
+*/
+
+function openBusinessEncounter(id) {
+
+
+    if (
+        !gameStarted
+    ) {
+
+        alert(
+            'Initialize the quest first.'
+        );
+
+        return;
+
+    }
+
+
+    if (
+        gameState.arrested
+    ) {
+
+        alert(
+            'You cannot explore while incarcerated.'
+        );
+
+        return;
+
+    }
+
+
+    if (
+        gameWon
+    ) {
+
+        alert(
+            'The Golden Key has already been found this quest!'
+        );
+
+        return;
+
+    }
+
+
+    if (
+        movesLeft <= 0
+    ) {
+
+        alert(
+            'Roll the die for moves first.'
+        );
+
+        return;
+
+    }
+
+
+    const poi =
+        poiList.find(
+            p => p.id === id
+        );
+
+
+    if (!poi) return;
+
+
+    const catLabel =
+
+        poi.category.charAt(0).toUpperCase()
+        +
+        poi.category.slice(1);
+
+
+    let body = `
+
+        <strong style="color:var(--gold);">${poi.name}</strong><br>
+
+        <span style="color:var(--muted);font-size:.7rem;">
+            ${catLabel}${poi.address ? ' • ' + poi.address : ''}
+        </span><br><br>
+
+        ${poi.searched
+            ? 'You already searched this location.'
+            : 'Search this location for the Golden Key? (Costs 1 move)'}
+
+    `;
+
+
+    const actions = [];
+
+
+    if (!poi.searched) {
+
+        actions.push({
+            text: 'SEARCH LOCATION',
+            action: () => searchBusiness(poi.id)
+        });
+
+    }
+
+
+    if (poi.website) {
+
+        actions.push({
+            text: 'VISIT WEBSITE',
+            action: () => window.open(poi.website, '_blank')
+        });
+
+    }
+
+
+    actions.push({
+        text: 'LEAVE',
+        action: closeModal
+    });
+
+
+    showModal(
+        'BUSINESS ENCOUNTER',
+        body,
+        actions
+    );
+
+}
+
+
+/*
+   Search a real business for the
+   Golden Key.
+*/
+
+function searchBusiness(id) {
+
+
+    const poi =
+        poiList.find(
+            p => p.id === id
+        );
+
+
+    if (
+        !poi ||
+        poi.searched
+    ) {
+
+        closeModal();
+
+        return;
+
+    }
+
+
+    movesLeft--;
+
+
+    document
+        .getElementById('moves-count')
+        .innerText = movesLeft;
+
+
+    poi.searched = true;
+
+
+    if (poi.isGoldenKey) {
+
+
+        gameWon = true;
+
+
+        gameState.clues++;
+
+
+        awardPoints(
+            500,
+            'GOLDEN KEY DISCOVERED'
+        );
+
+
+        addLog(
+            `🔑 GOLDEN KEY FOUND AT ${poi.name}!`
+        );
+
+
+        placePoiMarkers();
+
+
+        speak(
+
+            `Congratulations! The Golden Key was hidden at ${poi.name}. ` +
+            `Visit them to celebrate your quest!`
+
+        );
+
+
+        showModal(
+
+            '🔑 GOLDEN KEY FOUND!',
+
+            `
+                <strong style="color:var(--gold);font-size:1.1rem;">
+                    ${poi.name}
+                </strong><br>
+
+                ${poi.address ? poi.address + '<br>' : ''}
+                <br>
+
+                You found the Golden Key to the city! Be sure to stop by
+                ${poi.name} in real life to see what they have to offer.
+            `,
+
+            [
+                { text: 'CLAIM VICTORY', action: closeModal }
+            ]
+
+        );
+
+
+    } else {
+
+
+        gameState.clues++;
+
+
+        const clue =
+            generateClue(poi);
+
+
+        awardPoints(
+            15,
+            'CLUE GATHERED'
+        );
+
+
+        addLog(
+            `CLUE // ${clue}`
+        );
+
+
+        speak(clue);
+
+
+        placePoiMarkers();
+
+
+        showModal(
+
+            'NO KEY HERE',
+
+            `
+                No Golden Key at ${poi.name}, but a local tells you:
+                <br><br>
+                <em>"${clue}"</em>
+            `,
+
+            [
+                { text: 'CONTINUE', action: closeModal }
+            ]
+
+        );
+
+    }
+
+}
+
+
+/*
+   Simple instructions modal.
+*/
+
+function showHowToPlay() {
+
+
+    showModal(
+
+        'HOW TO PLAY',
+
+        `
+            <ol style="padding-left:18px;line-height:1.8;">
+
+                <li>Roll the die (bottom of screen) to get movement points.</li>
+
+                <li>Every glowing marker on the map is a real local business or attraction.</li>
+
+                <li>Click a marker, then choose SEARCH LOCATION. Each search costs 1 move.</li>
+
+                <li>No key there? You'll get a spoken and written clue pointing toward it.</li>
+
+                <li>Find the Golden Key to win — then go visit the business that hosted it!</li>
+
+            </ol>
+        `,
+
+        [
+            { text: 'GOT IT', action: closeModal }
+        ]
+
+    );
+
+}
+
+
+/* =========================================================
    ACTIVITY LOG
 ========================================================= */
 
@@ -2815,6 +3648,14 @@ async function initGame() {
         gameState.lng
 
     );
+
+
+    /*
+       Load real local businesses and
+       hide the Golden Key among them.
+    */
+
+    await loadNearbyPOIs();
 
 
     /*
@@ -3130,146 +3971,6 @@ function rollDice() {
 
 
     updateUI();
-
-}
-
-
-/* =========================================================
-   BUSINESS / LOCATION
-========================================================= */
-
-function openLocationEncounter() {
-
-
-    if (
-        !gameStarted
-    ) {
-
-        alert(
-            'Initialize the quest first.'
-        );
-
-        return;
-
-    }
-
-
-    if (
-        movesLeft <= 0
-    ) {
-
-        alert(
-            'Roll the movement system first.'
-        );
-
-        return;
-
-    }
-
-
-    if (
-        gameState.arrested
-    ) {
-
-        alert(
-            'You cannot explore while incarcerated.'
-        );
-
-        return;
-
-    }
-
-
-    movesLeft--;
-
-
-    document
-        .getElementById(
-            'moves-count'
-        )
-        .innerText =
-        movesLeft;
-
-
-    showModal(
-
-        'LOCAL BUSINESS NODE',
-
-        `
-
-            You have reached a business
-            or local location.
-
-            Search the location for clues
-            that contribute toward the
-            Golden Key investigation.
-
-        `,
-
-        [
-
-            {
-
-                text:
-                    'SEARCH LOCATION',
-
-                action:
-                    searchForGoldenKey
-
-            },
-
-            {
-
-                text:
-                    'LEAVE',
-
-                action:
-                    closeModal
-
-            }
-
-        ]
-
-    );
-
-}
-
-
-/* =========================================================
-   CLUE SYSTEM
-========================================================= */
-
-function searchForGoldenKey() {
-
-
-    gameState.clues++;
-
-
-    const clueReward =
-
-        25 +
-        Math.floor(
-            Math.random() * 26
-        );
-
-
-    awardPoints(
-
-        clueReward,
-
-        'LOCATION CLUE DISCOVERED'
-
-    );
-
-
-    addLog(
-
-        `CLUE #${gameState.clues} ADDED TO INVESTIGATION`
-
-    );
-
-
-    closeModal();
 
 }
 

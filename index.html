@@ -7,7 +7,7 @@
 <meta name="viewport"
       content="width=device-width, initial-scale=1.0">
 
-<title>CITY KEY QUEST // NEXUS</title>
+<title>WIZECITY.COM // NEXUS</title>
 
 
 <!-- =========================================================
@@ -1476,7 +1476,7 @@ select:focus {
     <i class="fa-solid fa-key header-key"></i>
 
     <span class="header-title">
-        CITY KEY QUEST
+        WIZECITY.COM
     </span>
 
     <span class="header-status">
@@ -1932,6 +1932,20 @@ select:focus {
         WORLD ACTIONS
 
     </div>
+
+
+    <button
+        class="action-btn"
+        onclick="rescanBusinesses()">
+
+        <i
+            class="fa-solid fa-arrows-rotate"
+            style="color:var(--green)">
+        </i>
+
+        Rescan Local Businesses
+
+    </button>
 
 
     <button
@@ -2599,6 +2613,27 @@ async function getCoordinatesFromZip(zip) {
    tourist attractions and historic sites near the player.
 ========================================================= */
 
+/* =========================================================
+   FREE LOCAL BUSINESS DATA (OpenStreetMap Overpass API)
+   No API key required. Pulls real shops, restaurants,
+   tourist attractions and historic sites near the player.
+
+   The public Overpass servers are shared, free infrastructure
+   and occasionally rate-limit or time out. We try a short list
+   of mirrors in order and only give up if all of them fail.
+========================================================= */
+
+const OVERPASS_ENDPOINTS = [
+
+    'https://overpass-api.de/api/interpreter',
+
+    'https://overpass.kumi.systems/api/interpreter',
+
+    'https://overpass.openstreetmap.ru/api/interpreter'
+
+];
+
+
 async function fetchNearbyPOIs(lat, lng, radius = 1200) {
 
 
@@ -2614,44 +2649,76 @@ async function fetchNearbyPOIs(lat, lng, radius = 1200) {
     `;
 
 
-    const response =
-        await fetch(
+    let lastError = null;
 
-            'https://overpass-api.de/api/interpreter',
 
-            {
-                method:
-                    'POST',
+    for (const endpoint of OVERPASS_ENDPOINTS) {
 
-                body:
-                    'data=' + encodeURIComponent(query)
+        try {
+
+            const response =
+                await fetch(
+
+                    endpoint,
+
+                    {
+                        method:
+                            'POST',
+
+                        body:
+                            'data=' + encodeURIComponent(query)
+                    }
+
+                );
+
+
+            if (
+                !response.ok
+            ) {
+
+                throw new Error(
+                    `Server returned ${response.status}`
+                );
+
             }
 
-        );
+
+            const data =
+                await response.json();
 
 
-    if (
-        !response.ok
-    ) {
+            return (
+                data.elements || []
+            ).filter(
 
-        throw new Error(
-            'Business directory lookup failed.'
-        );
+                el =>
+                    el.tags &&
+                    el.tags.name
+
+            );
+
+
+        } catch (error) {
+
+            lastError = error;
+
+            /*
+               This mirror failed or is rate-limited —
+               move on and try the next free server.
+            */
+
+            continue;
+
+        }
 
     }
 
 
-    const data =
-        await response.json();
+    throw new Error(
 
-
-    return (
-        data.elements || []
-    ).filter(
-
-        el =>
-            el.tags &&
-            el.tags.name
+        lastError
+            ? `All business directory servers are unavailable (${lastError.message}).`
+            : 'All business directory servers are unavailable.'
 
     );
 
@@ -3374,6 +3441,32 @@ function searchBusiness(id) {
         );
 
     }
+
+}
+
+
+/*
+   Manual retry, reachable from the
+   World Actions menu at any time.
+*/
+
+function rescanBusinesses() {
+
+
+    if (
+        !gameStarted
+    ) {
+
+        alert(
+            'Initialize the quest first.'
+        );
+
+        return;
+
+    }
+
+
+    loadNearbyPOIs();
 
 }
 

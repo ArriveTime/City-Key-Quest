@@ -1363,40 +1363,108 @@ select:focus {
 
 
 /* =========================================================
+   MOBILE PANEL TOGGLE BUTTONS (hidden on desktop)
+========================================================= */
+
+.mobile-toggle {
+
+    display: none;
+    position: absolute;
+    z-index: 1200;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(3,10,20,.92);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    font-size: 1.15rem;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 15px rgba(0,246,255,.25);
+}
+
+.mobile-toggle-left { top: 112px; left: 10px; }
+.mobile-toggle-right { top: 112px; right: 10px; }
+
+.mobile-close-btn {
+    display: none;
+}
+
+
+/* =========================================================
    MOBILE
 ========================================================= */
 
-@media(max-width:800px) {
+@media(max-width:900px) {
 
-    #left-sidebar {
+    .mobile-toggle {
+        display: flex;
+    }
 
-        width:
-            260px;
+    /*
+       On phones and small tablets, the player panel and
+       world-actions panel become full-screen drawers
+       instead of cramped fixed-width strips, so nothing
+       overlaps and nothing has to squeeze into 200px.
+    */
+
+    #left-sidebar,
+    #action-menu {
+
+        display: none;
+
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+
+        width: auto;
+        max-height: none;
+
+        border-radius: 0;
+        z-index: 2500;
+
+        padding: 20px 18px 24px;
+
+        overflow-y: auto;
 
     }
 
-    #action-menu {
+    #left-sidebar.mobile-open,
+    #action-menu.mobile-open {
+        display: flex;
+    }
 
-        width:
-            190px;
+    .mobile-close-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
 
+        align-self: flex-end;
+
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.15);
+        color: var(--text);
+
+        padding: 10px 16px;
+        border-radius: 8px;
+
+        font-family: Orbitron, sans-serif;
+        font-size: .68rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+
+        margin-bottom: 14px;
     }
 
     .header-title {
-
-        font-size:
-            .9rem;
-
-        letter-spacing:
-            2px;
-
+        font-size: .9rem;
+        letter-spacing: 2px;
     }
 
     .header-status {
-
-        display:
-            none;
-
+        display: none;
     }
 
 }
@@ -1404,54 +1472,34 @@ select:focus {
 
 @media(max-width:600px) {
 
-    #left-sidebar {
-
-        width:
-            230px;
-
-        left:
-            8px;
-
-        top:
-            8px;
-
-        bottom:
-            8px;
-
-    }
-
-    #action-menu {
-
-        right:
-            8px;
-
-        top:
-            90px;
-
-        width:
-            170px;
-
-    }
-
     .top-header {
-
-        padding:
-            9px 15px;
-
+        padding: 9px 15px;
     }
 
     .header-title {
-
-        font-size:
-            .72rem;
-
+        font-size: .72rem;
     }
 
     .status-chip {
+        display: none;
+    }
 
-        display:
-            none;
+    .mobile-toggle {
+        top: 100px;
+        width: 42px;
+        height: 42px;
+        font-size: 1.05rem;
+    }
 
+    .roll-orb {
+        width: 64px;
+        height: 64px;
+        font-size: 1.4rem;
+    }
+
+    .moves-tag {
+        padding: 10px 14px;
+        font-size: .68rem;
     }
 
 }
@@ -1500,6 +1548,30 @@ select:focus {
 
 
 <!-- =========================================================
+     MOBILE PANEL TOGGLES (hidden on desktop)
+========================================================= -->
+
+<button
+    class="mobile-toggle mobile-toggle-left"
+    id="sidebar-toggle-btn"
+    onclick="toggleMobilePanel('left-sidebar')">
+
+    <i class="fa-solid fa-user"></i>
+
+</button>
+
+
+<button
+    class="mobile-toggle mobile-toggle-right"
+    id="actions-toggle-btn"
+    onclick="toggleMobilePanel('action-menu')">
+
+    <i class="fa-solid fa-bars"></i>
+
+</button>
+
+
+<!-- =========================================================
      MAP
 ========================================================= -->
 
@@ -1513,6 +1585,11 @@ select:focus {
 <div
     class="ui-panel"
     id="left-sidebar">
+
+    <button class="mobile-close-btn" onclick="toggleMobilePanel('left-sidebar')">
+        <i class="fa-solid fa-xmark"></i> Close
+    </button>
+
 
 
     <!-- LIVE POINTS -->
@@ -1925,6 +2002,11 @@ select:focus {
 <div
     class="ui-panel"
     id="action-menu">
+
+    <button class="mobile-close-btn" onclick="toggleMobilePanel('action-menu')">
+        <i class="fa-solid fa-xmark"></i> Close
+    </button>
+
 
 
     <div class="panel-title">
@@ -5682,6 +5764,50 @@ function formatTime(
             .padStart(2,'0')
 
     );
+
+}
+
+
+/* =========================================================
+   MOBILE PANEL DRAWERS
+
+   On narrow screens, the player panel and world-actions
+   panel become full-screen overlays instead of cramped
+   side-by-side strips, so nothing overlaps or squeezes.
+========================================================= */
+
+function toggleMobilePanel(id) {
+
+
+    const panel =
+        document.getElementById(id);
+
+
+    const isOpen =
+        panel.classList.contains('mobile-open');
+
+
+    /*
+       Only one drawer open at a time.
+    */
+
+    document
+        .getElementById('left-sidebar')
+        .classList
+        .remove('mobile-open');
+
+
+    document
+        .getElementById('action-menu')
+        .classList
+        .remove('mobile-open');
+
+
+    if (!isOpen) {
+
+        panel.classList.add('mobile-open');
+
+    }
 
 }
 
